@@ -31,6 +31,14 @@ def reset_data():
     data_hari["total_saldo"] = 0
     data_hari["total_kantong"] = 0
 
+def is_nomor_hp(teks):
+    nomor = re.sub(r'[\s\-\(\)\+]', '', teks)
+    nomor = re.sub(r'\D', '', nomor)
+    if nomor.startswith('62') or nomor.startswith('0'):
+        if len(nomor) >= 10 and len(nomor) <= 15:
+            return True
+    return False
+
 def konversi_nomor(teks):
     nomor = re.sub(r'[\s\-\(\)\+]', '', teks)
     nomor = re.sub(r'\D', '', nomor)
@@ -91,8 +99,9 @@ async def auto_reset(context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_nomor(update: Update, context: ContextTypes.DEFAULT_TYPE):
     teks = update.message.text.strip()
-    nomor = konversi_nomor(teks)
-    if nomor:
+
+    if is_nomor_hp(teks):
+        nomor = konversi_nomor(teks)
         link = f"https://wa.me/{nomor}?text={PESAN.replace(' ', '%20')}"
         await update.message.reply_text(link)
         await update.message.reply_text("Tarif berapa? (contoh: 15000)")
@@ -105,10 +114,14 @@ async def handle_tarif(update: Update, context: ContextTypes.DEFAULT_TYPE):
     teks = re.sub(r'\D', '', update.message.text.strip())
     if teks:
         tarif = int(teks)
+        if tarif > 1000000:
+            await update.message.reply_text("⚠️ Tarif terlalu besar, coba cek lagi.")
+            return TUNGGU_TARIF
         hasil = hitung_tarif(tarif)
         await update.message.reply_text(hasil)
     else:
         await update.message.reply_text("Angka tidak valid, coba lagi.")
+        return TUNGGU_TARIF
     return ConversationHandler.END
 
 async def rekap(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -126,8 +139,12 @@ async def rekap(update: Update, context: ContextTypes.DEFAULT_TYPE):
 🏁 Total Kantong: Rp {data_hari['total_kantong']:,.0f}
 """)
 
+async def reset_manual(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    reset_data()
+    await update.message.reply_text("✅ Data berhasil direset! Mulai hitung dari 0 lagi.")
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Hallo Andhika! Kirim nomor HP pelanggan, aku langsung buatin link WA dan hitung alokasi tarif kamu. 🚀\n\nKetik /rekap untuk lihat total hari ini.")
+    await update.message.reply_text("Hallo Andhika! Kirim nomor HP pelanggan, aku langsung buatin link WA dan hitung alokasi tarif kamu. 🚀\n\nKetik /rekap untuk lihat total hari ini.\nKetik /reset untuk reset data manual.")
 
 app = ApplicationBuilder().token(TOKEN).build()
 
@@ -143,6 +160,7 @@ conv_handler = ConversationHandler(
 
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("rekap", rekap))
+app.add_handler(CommandHandler("reset", reset_manual))
 app.add_handler(conv_handler)
 
 print("Bot jalan...")
