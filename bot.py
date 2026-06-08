@@ -5,7 +5,7 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, filters, ContextTypes, ConversationHandler
 
 TOKEN = "8849663961:AAHDnl2ooXZGBovLkFEn7NPc_XdkX_F6QQ4"
-PESAN = "Hallo, aku dari Maxim"
+PESAN = "Hallo ka,aku dari driver Maxim"
 CHAT_ID = 8036036520
 
 TUNGGU_TARIF = 1
