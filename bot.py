@@ -23,21 +23,8 @@ data_hari = {
 }
 
 def reset_data():
-    data_hari["orders"] = []
-    data_hari["total_kotor"] = 0
-    data_hari["total_potongan"] = 0
-    data_hari["total_bersih"] = 0
-    data_hari["total_bensin"] = 0
-    data_hari["total_saldo"] = 0
-    data_hari["total_kantong"] = 0
-
-def is_nomor_hp(teks):
-    nomor = re.sub(r'[\s\-\(\)\+]', '', teks)
-    nomor = re.sub(r'\D', '', nomor)
-    if nomor.startswith('62') or nomor.startswith('0'):
-        if len(nomor) >= 10 and len(nomor) <= 15:
-            return True
-    return False
+    for key in data_hari:
+        data_hari[key] = [] if key == "orders" else 0
 
 def konversi_nomor(teks):
     nomor = re.sub(r'[\s\-\(\)\+]', '', teks)
@@ -51,6 +38,11 @@ def konversi_nomor(teks):
     if len(nomor) < 10 or len(nomor) > 15:
         return None
     return nomor
+
+def is_nomor_hp(teks):
+    nomor = re.sub(r'[\s\-\(\)\+]', '', teks)
+    nomor = re.sub(r'\D', '', nomor)
+    return (nomor.startswith('62') or nomor.startswith('0')) and 10 <= len(nomor) <= 15
 
 def hitung_tarif(tarif):
     komisi = tarif * 0.13
@@ -97,9 +89,16 @@ async def auto_reset(context: ContextTypes.DEFAULT_TYPE):
         text="🔄 Tengah malam! Data harian sudah direset. Semangat narik hari ini! 🚀"
     )
 
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "Hallo Andhika! Kirim nomor HP pelanggan, aku langsung buatin link WA dan hitung alokasi tarif kamu. 🚀\n\n"
+        "Ketik /rekap untuk lihat total hari ini.\n"
+        "Ketik /reset untuk reset data manual."
+    )
+    return ConversationHandler.END
+
 async def handle_nomor(update: Update, context: ContextTypes.DEFAULT_TYPE):
     teks = update.message.text.strip()
-
     if is_nomor_hp(teks):
         nomor = konversi_nomor(teks)
         link = f"https://wa.me/{nomor}?text={PESAN.replace(' ', '%20')}"
@@ -112,23 +111,22 @@ async def handle_nomor(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_tarif(update: Update, context: ContextTypes.DEFAULT_TYPE):
     teks = re.sub(r'\D', '', update.message.text.strip())
-    if teks:
-        tarif = int(teks)
-        if tarif > 1000000:
-            await update.message.reply_text("⚠️ Tarif terlalu besar, coba cek lagi.")
-            return TUNGGU_TARIF
-        hasil = hitung_tarif(tarif)
-        await update.message.reply_text(hasil)
-    else:
+    if not teks:
         await update.message.reply_text("Angka tidak valid, coba lagi.")
         return TUNGGU_TARIF
+    tarif = int(teks)
+    if tarif > 1000000:
+        await update.message.reply_text("⚠️ Tarif terlalu besar, coba cek lagi.")
+        return TUNGGU_TARIF
+    hasil = hitung_tarif(tarif)
+    await update.message.reply_text(hasil)
     return ConversationHandler.END
 
 async def rekap(update: Update, context: ContextTypes.DEFAULT_TYPE):
     n = len(data_hari["orders"])
     if n == 0:
         await update.message.reply_text("Belum ada order hari ini.")
-        return
+        return ConversationHandler.END
     await update.message.reply_text(f"""
 📊 Rekap Hari Ini ({n} order):
 💵 Total Kotor: Rp {data_hari['total_kotor']:,.0f}
@@ -138,13 +136,12 @@ async def rekap(update: Update, context: ContextTypes.DEFAULT_TYPE):
 💳 Total Saldo: Rp {data_hari['total_saldo']:,.0f}
 🏁 Total Kantong: Rp {data_hari['total_kantong']:,.0f}
 """)
+    return ConversationHandler.END
 
 async def reset_manual(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reset_data()
     await update.message.reply_text("✅ Data berhasil direset! Mulai hitung dari 0 lagi.")
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Hallo Andhika! Kirim nomor HP pelanggan, aku langsung buatin link WA dan hitung alokasi tarif kamu. 🚀\n\nKetik /rekap untuk lihat total hari ini.\nKetik /reset untuk reset data manual.")
+    return ConversationHandler.END
 
 app = ApplicationBuilder().token(TOKEN).build()
 
@@ -155,7 +152,11 @@ conv_handler = ConversationHandler(
     states={
         TUNGGU_TARIF: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_tarif)],
     },
-    fallbacks=[CommandHandler("start", start)],
+    fallbacks=[
+        CommandHandler("start", start),
+        CommandHandler("rekap", rekap),
+        CommandHandler("reset", reset_manual),
+    ],
 )
 
 app.add_handler(CommandHandler("start", start))
