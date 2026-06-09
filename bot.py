@@ -1,24 +1,21 @@
 import re
 import logging
-import json
 import aiohttp
-from datetime import time, datetime, timedelta
+from datetime import time, datetime
 from zoneinfo import ZoneInfo
-
-WIB = ZoneInfo("Asia/Makassar")
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, CallbackQueryHandler, filters, ContextTypes, ConversationHandler
 
 TOKEN = "8849663961:AAHDnl2ooXZGBovLkFEn7NPc_XdkX_F6QQ4"
-PESAN = "Hallo ka, aku dari driver maxim"
+PESAN = "Hallo, aku dari Maxim"
 CHAT_ID = 8036036520
 KOTA_DEFAULT = "Palu"
+WIB = ZoneInfo("Asia/Makassar")
 
 TUNGGU_TARIF = 1
 
 logging.basicConfig(level=logging.INFO)
 
-# Data harian
 data = {
     "orders": [],
     "total_kotor": 0,
@@ -28,15 +25,13 @@ data = {
     "total_saldo": 0,
     "total_kantong": 0,
     "total_makan": 0,
+    "total_saldo_keluar": 0,
     "history_makan": [],
     "history_pengeluaran": [],
-    "total_saldo_keluar": 0,
 }
 
-# Riwayat mingguan (simpan per hari)
 riwayat = []
 
-# Pengaturan
 setting = {
     "hitung_bensin": True,
     "hitung_saldo": True,
@@ -55,7 +50,6 @@ HARGA_BBM = {
 }
 
 def reset_semua():
-    # Simpan data hari ini ke riwayat sebelum reset
     if data["total_kotor"] > 0:
         riwayat.append({
             "tanggal": datetime.now(WIB).strftime("%d/%m/%Y"),
@@ -65,10 +59,8 @@ def reset_semua():
             "total_bersih": data["total_bersih"],
             "total_kantong": data["total_kantong"],
         })
-        # Simpan max 7 hari
         if len(riwayat) > 7:
             riwayat.pop(0)
-
     for key in data:
         if key in ["orders", "history_makan", "history_pengeluaran"]:
             data[key] = []
@@ -78,6 +70,9 @@ def reset_semua():
     setting["saldo_tercapai"] = False
 
 def ekstrak_nomor(teks):
+    # Bersihkan awalan umum: wa, no, nomor, tlp, hp, telfon, telp, number, phone
+    teks = re.sub(r'(?i)^(wa|no|nomor|tlp|hp|telfon|telp|number|phone|nomer|telpn|nomor tlfn\s*:?)\s*', '', teks.strip())
+    # Cari pola nomor HP
     kandidat = re.findall(r'(?:\+62|62|0)[\d\s\-]{8,17}', teks)
     for k in kandidat:
         nomor = re.sub(r'[\s\-\(\)\+]', '', k)
@@ -95,7 +90,6 @@ def ekstrak_nomor(teks):
 def hitung_tarif(tarif):
     komisi = tarif * 0.13
     sisa = tarif - komisi
-
     bensin = sisa * 0.10 if setting["hitung_bensin"] and not setting["bensin_tercapai"] else 0
     saldo = sisa * 0.10 if setting["hitung_saldo"] and not setting["saldo_tercapai"] else 0
     kantong = sisa - bensin - saldo
@@ -122,8 +116,6 @@ def hitung_tarif(tarif):
     status_bensin = "⏸ nonaktif" if not setting["hitung_bensin"] else ("✅ tercapai" if setting["bensin_tercapai"] else f"Rp {data['total_bensin']:,.0f} / Rp {setting['target_bensin']:,.0f}")
     status_saldo = "⏸ nonaktif" if not setting["hitung_saldo"] else ("✅ tercapai" if setting["saldo_tercapai"] else f"Rp {data['total_saldo']:,.0f} / Rp {setting['target_saldo']:,.0f}")
 
-    makan_line = f"\n🍱 Uang makan: -Rp {makan:,.0f}" if makan > 0 else ""
-
     return f"""
 💰 Tarif Masuk: Rp {tarif:,.0f}
 ✂️ Potongan Apk (13%): -Rp {komisi:,.0f}
@@ -131,8 +123,8 @@ Sisa Bersih Aplikasi: Rp {sisa:,.0f}
 
 📥 Alokasi:
 ⛽ Bensin: Rp {bensin:,.0f}
-💳 Saldo: Rp {saldo:,.0f}{makan_line}
-🏁 KANTONG BERSIH: Rp {kantong_bersih:,.0f}
+💳 Saldo: Rp {saldo:,.0f}
+🏁 KANTONG BERSIH: Rp {kantong:,.0f}
 {notif_bensin}{notif_saldo}
 ━━━━━━━━━━━━━━━━
 📊 Rekap Hari Ini ({n} order):
@@ -152,18 +144,12 @@ async def laporan_mingguan(context: ContextTypes.DEFAULT_TYPE):
     if not riwayat:
         await context.bot.send_message(chat_id=CHAT_ID, text="📊 Belum ada data minggu ini.")
         return
-
     total_kotor = sum(r["total_kotor"] for r in riwayat)
     total_bersih = sum(r["total_bersih"] for r in riwayat)
     total_kantong = sum(r["total_kantong"] for r in riwayat)
     total_orders = sum(r["orders"] for r in riwayat)
     hari_terbaik = max(riwayat, key=lambda x: x["total_kantong"])
-
-    detail = "\n".join([
-        f"📅 {r['tanggal']} — Rp {r['total_kantong']:,.0f} ({r['orders']} order)"
-        for r in riwayat
-    ])
-
+    detail = "\n".join([f"📅 {r['tanggal']} — Rp {r['total_kantong']:,.0f} ({r['orders']} order)" for r in riwayat])
     await context.bot.send_message(chat_id=CHAT_ID, text=f"""
 📊 LAPORAN MINGGUAN
 
@@ -229,7 +215,7 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 /historypengeluaran — Semua pengeluaran hari ini
 
 🛵 BBM & Jarak:
-/setbbm — Pilih jenis BBM
+/setbbm [pertalite/pertamax] — Pilih jenis BBM
 /setkm [km/liter] — Set konsumsi motor
 /jarak [km] — Hitung biaya bensin
 
@@ -256,7 +242,7 @@ async def handle_nomor(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Tarif berapa? (contoh: 15000)")
         return TUNGGU_TARIF
     else:
-        await update.message.reply_text("Format nomor tidak dikenal. Coba kirim nomor HP pelanggan.")
+        await update.message.reply_text("Format nomor tidak dikenal.\n\nContoh yang valid:\n085xxxxxxx\n+62 85xxxxxxx\n6285xxxxxxx\nnama: X\nnomor tlfn: 085xxx")
         return ConversationHandler.END
 
 async def handle_tarif(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -266,7 +252,7 @@ async def handle_tarif(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return TUNGGU_TARIF
     tarif = int(teks)
     if tarif > 500000:
-        await update.message.reply_text("⚠️ Tarif terlalu besar, coba cek lagi.")
+        await update.message.reply_text("⚠️ Tarif terlalu besar, coba cek lagi.\nMaksimal Rp 500.000")
         return TUNGGU_TARIF
     hasil = hitung_tarif(tarif)
     await update.message.reply_text(hasil)
@@ -279,6 +265,7 @@ async def rekap(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
     status_bensin = "⏸ nonaktif" if not setting["hitung_bensin"] else ("✅ tercapai" if setting["bensin_tercapai"] else f"Rp {data['total_bensin']:,.0f} / Rp {setting['target_bensin']:,.0f}")
     status_saldo = "⏸ nonaktif" if not setting["hitung_saldo"] else ("✅ tercapai" if setting["saldo_tercapai"] else f"Rp {data['total_saldo']:,.0f} / Rp {setting['target_saldo']:,.0f}")
+    total_pengeluaran = data["total_makan"] + data["total_saldo_keluar"]
     await update.message.reply_text(f"""
 📊 Rekap Hari Ini ({n} order):
 💵 Total Kotor: Rp {data['total_kotor']:,.0f}
@@ -286,7 +273,7 @@ async def rekap(update: Update, context: ContextTypes.DEFAULT_TYPE):
 ✅ Total Bersih: Rp {data['total_bersih']:,.0f}
 ⛽ Bensin: {status_bensin}
 💳 Saldo: {status_saldo}
-🍱 Total Makan: Rp {data['total_makan']:,.0f}
+🍱 Total Pengeluaran: Rp {total_pengeluaran:,.0f}
 🏁 Total Kantong: Rp {data['total_kantong']:,.0f}
 """.strip())
     return ConversationHandler.END
@@ -344,20 +331,18 @@ async def set_target_saldo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def set_makan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.args:
-        nominal = re.sub(r"\D", "", context.args[0])
+        nominal = re.sub(r'\D', '', context.args[0])
         if nominal:
             jumlah = int(nominal)
             waktu = datetime.now(WIB).strftime("%H:%M")
-            data["history_makan"].append({"waktu": waktu, "jumlah": jumlah, "kategori": "makan"})
+            data["history_makan"].append({"waktu": waktu, "jumlah": jumlah})
             data["history_pengeluaran"].append({"waktu": waktu, "jumlah": jumlah, "alasan": "Makan"})
             data["total_makan"] += jumlah
             data["total_kantong"] -= jumlah
-
             keyboard = InlineKeyboardMarkup([[
                 InlineKeyboardButton("📋 History Makan", callback_data="history_makan"),
                 InlineKeyboardButton("💸 Semua Pengeluaran", callback_data="history_pengeluaran"),
             ]])
-
             await update.message.reply_text(f"""
 🍱 Pengeluaran makan dicatat!
 💸 Rp {jumlah:,.0f} dikurangi dari kantong
@@ -370,7 +355,7 @@ Total makan: Rp {data['total_makan']:,.0f}
 
 async def kurang_saldo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(context.args) >= 2:
-        nominal = re.sub(r"\D", "", context.args[0])
+        nominal = re.sub(r'\D', '', context.args[0])
         alasan = " ".join(context.args[1:])
         if nominal:
             jumlah = int(nominal)
@@ -378,11 +363,9 @@ async def kurang_saldo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             data["history_pengeluaran"].append({"waktu": waktu, "jumlah": jumlah, "alasan": alasan})
             data["total_saldo_keluar"] += jumlah
             data["total_kantong"] -= jumlah
-
             keyboard = InlineKeyboardMarkup([[
                 InlineKeyboardButton("💸 Semua Pengeluaran", callback_data="history_pengeluaran"),
             ]])
-
             await update.message.reply_text(f"""
 💸 Pengeluaran dicatat!
 📝 Alasan: {alasan}
@@ -397,10 +380,7 @@ async def history_makan_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not data["history_makan"]:
         await update.message.reply_text("Belum ada pengeluaran makan hari ini.")
         return ConversationHandler.END
-    history_text = "\n".join([
-        f"• {h['waktu']} - Rp {h['jumlah']:,.0f}"
-        for h in data["history_makan"]
-    ])
+    history_text = "\n".join([f"• {h['waktu']} - Rp {h['jumlah']:,.0f}" for h in data["history_makan"]])
     await update.message.reply_text(f"""
 🍱 History Makan Hari Ini:
 {history_text}
@@ -413,10 +393,7 @@ async def history_pengeluaran_cmd(update: Update, context: ContextTypes.DEFAULT_
     if not data["history_pengeluaran"]:
         await update.message.reply_text("Belum ada pengeluaran hari ini.")
         return ConversationHandler.END
-    history_text = "\n".join([
-        f"• {h['waktu']} - Rp {h['jumlah']:,.0f} ({h['alasan']})"
-        for h in data["history_pengeluaran"]
-    ])
+    history_text = "\n".join([f"• {h['waktu']} - Rp {h['jumlah']:,.0f} ({h['alasan']})" for h in data["history_pengeluaran"]])
     total = data["total_makan"] + data["total_saldo_keluar"]
     await update.message.reply_text(f"""
 💸 Semua Pengeluaran Hari Ini:
@@ -434,10 +411,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not data["history_makan"]:
             await query.edit_message_text("Belum ada pengeluaran makan hari ini.")
             return
-        history_text = "\n".join([
-            f"• {h['waktu']} - Rp {h['jumlah']:,.0f}"
-            for h in data["history_makan"]
-        ])
+        history_text = "\n".join([f"• {h['waktu']} - Rp {h['jumlah']:,.0f}" for h in data["history_makan"]])
         await query.edit_message_text(f"""
 🍱 History Makan Hari Ini:
 {history_text}
@@ -448,10 +422,7 @@ Total makan: Rp {data['total_makan']:,.0f}
         if not data["history_pengeluaran"]:
             await query.edit_message_text("Belum ada pengeluaran hari ini.")
             return
-        history_text = "\n".join([
-            f"• {h['waktu']} - Rp {h['jumlah']:,.0f} ({h['alasan']})"
-            for h in data["history_pengeluaran"]
-        ])
+        history_text = "\n".join([f"• {h['waktu']} - Rp {h['jumlah']:,.0f} ({h['alasan']})" for h in data["history_pengeluaran"]])
         total = data["total_makan"] + data["total_saldo_keluar"]
         await query.edit_message_text(f"""
 💸 Semua Pengeluaran Hari Ini:
@@ -462,17 +433,14 @@ Total pengeluaran: Rp {total:,.0f}
 """.strip())
 
 async def set_bbm(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("""
-Pilih jenis BBM:
-1️⃣ /setbbm pertalite — Rp 10.000/liter
-2️⃣ /setbbm pertamax — Rp 12.300/liter
-""".strip())
     if context.args:
         jenis = context.args[0].lower()
         if jenis in HARGA_BBM:
             setting["jenis_bbm"] = jenis
             setting["harga_bbm"] = HARGA_BBM[jenis]
             await update.message.reply_text(f"✅ BBM diset ke {jenis.capitalize()} Rp {HARGA_BBM[jenis]:,.0f}/liter")
+            return ConversationHandler.END
+    await update.message.reply_text("Pilih jenis BBM:\n/setbbm pertalite — Rp 10.000/liter\n/setbbm pertamax — Rp 12.300/liter")
     return ConversationHandler.END
 
 async def set_km(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -514,16 +482,14 @@ async def cuaca(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     teks = await resp.text()
                     await update.message.reply_text(f"🌤 {teks.strip()}")
                 else:
-                    await update.message.reply_text(f"Kota tidak ditemukan. Coba nama kota lain.")
+                    await update.message.reply_text("Kota tidak ditemukan. Coba nama kota lain.")
     except Exception:
         await update.message.reply_text("Gagal ambil data cuaca. Coba lagi nanti.")
     return ConversationHandler.END
 
 app = ApplicationBuilder().token(TOKEN).build()
 
-# Reset tiap tengah malam WIB = 17.00 UTC
 app.job_queue.run_daily(auto_reset, time=time(17, 0, 0))
-# Laporan mingguan tiap Senin pagi jam 07.00 WIB = 23.00 UTC Minggu
 app.job_queue.run_daily(laporan_mingguan, time=time(23, 0, 0), days=(6,))
 
 conv_handler = ConversationHandler(
