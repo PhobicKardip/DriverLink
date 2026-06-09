@@ -3,6 +3,9 @@ import logging
 import json
 import aiohttp
 from datetime import time, datetime, timedelta
+from zoneinfo import ZoneInfo
+
+WIB = ZoneInfo("Asia/Makassar")
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, filters, ContextTypes, ConversationHandler
 
@@ -53,8 +56,8 @@ def reset_semua():
     # Simpan data hari ini ke riwayat sebelum reset
     if data["total_kotor"] > 0:
         riwayat.append({
-            "tanggal": datetime.now().strftime("%d/%m/%Y"),
-            "hari": datetime.now().strftime("%A"),
+            "tanggal": datetime.now(WIB).strftime("%d/%m/%Y"),
+            "hari": datetime.now(WIB).strftime("%A"),
             "orders": len(data["orders"]),
             "total_kotor": data["total_kotor"],
             "total_bersih": data["total_bersih"],
@@ -338,7 +341,7 @@ async def set_makan(update: Update, context: ContextTypes.DEFAULT_TYPE):
         nominal = re.sub(r"\D", "", context.args[0])
         if nominal:
             jumlah = int(nominal)
-            waktu = datetime.now().strftime("%H:%M")
+            waktu = datetime.now(WIB).strftime("%H:%M")
             data["history_makan"].append({"waktu": waktu, "jumlah": jumlah})
             data["total_makan"] += jumlah
             data["total_kantong"] -= jumlah
