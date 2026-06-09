@@ -10,7 +10,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, CallbackQueryHandler, filters, ContextTypes, ConversationHandler
 
 TOKEN = "8849663961:AAHDnl2ooXZGBovLkFEn7NPc_XdkX_F6QQ4"
-PESAN = "Hallo ka,aku dari driver maxim"
+PESAN = "Hallo ka, aku dari driver maxim"
 CHAT_ID = 8036036520
 KOTA_DEFAULT = "Palu"
 
@@ -223,7 +223,10 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 /targetsaldo [nominal] — Set target saldo
 
 🍱 Pengeluaran:
-/makan [nominal] — Set uang makan
+/makan [nominal] — Catat pengeluaran makan
+/kurangsaldo [nominal] [alasan] — Catat pengeluaran lain
+/historymakan — History pengeluaran makan
+/historypengeluaran — Semua pengeluaran hari ini
 
 🛵 BBM & Jarak:
 /setbbm — Pilih jenis BBM
@@ -237,6 +240,7 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 Contoh:
 /targetbensin 30000
 /makan 15000
+/kurangsaldo 10000 beli air minum
 /setkm 40
 /jarak 25
 /cuaca Manado
