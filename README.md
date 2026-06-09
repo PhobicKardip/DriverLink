@@ -1,5 +1,5 @@
 # DriverLinkBot
-# Asisten Pintar untuk Driver Maximl.
+# Asisten Pintar untuk Driver Maxim.
 
 Latar Belakang:
 Driver ojol sering harus WA pelanggan sambil nyetir motor. Harus copy nomor, buka WA, paste, ketik pesan — ribet dan bahaya. Belum lagi harus hitung sendiri berapa uang bersih yang didapat setelah potongan aplikasi. OjolLink Bot hadir buat nyeleseiin semua itu dalam satu alur simpel.
