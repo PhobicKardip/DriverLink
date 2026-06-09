@@ -7,7 +7,7 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, filters, ContextTypes, ConversationHandler
 
 TOKEN = "8849663961:AAHDnl2ooXZGBovLkFEn7NPc_XdkX_F6QQ4"
-PESAN = "Hallo ka, aku dari driver maxim"
+PESAN = "Hallo, aku dari Maxim"
 CHAT_ID = 8036036520
 KOTA_DEFAULT = "Palu"
 
@@ -25,6 +25,7 @@ data = {
     "total_saldo": 0,
     "total_kantong": 0,
     "total_makan": 0,
+    "history_makan": [],
 }
 
 # Riwayat mingguan (simpan per hari)
@@ -36,7 +37,6 @@ setting = {
     "hitung_saldo": True,
     "target_bensin": 25000,
     "target_saldo": 25000,
-    "uang_makan": 0,
     "bensin_tercapai": False,
     "saldo_tercapai": False,
     "jenis_bbm": "pertalite",
@@ -65,7 +65,10 @@ def reset_semua():
             riwayat.pop(0)
 
     for key in data:
-        data[key] = [] if key == "orders" else 0
+        if key in ["orders", "history_makan"]:
+            data[key] = []
+        else:
+            data[key] = 0
     setting["bensin_tercapai"] = False
     setting["saldo_tercapai"] = False
 
@@ -91,8 +94,6 @@ def hitung_tarif(tarif):
     bensin = sisa * 0.10 if setting["hitung_bensin"] and not setting["bensin_tercapai"] else 0
     saldo = sisa * 0.10 if setting["hitung_saldo"] and not setting["saldo_tercapai"] else 0
     kantong = sisa - bensin - saldo
-    makan = setting["uang_makan"]
-    kantong_bersih = kantong - makan
 
     data["orders"].append(tarif)
     data["total_kotor"] += tarif
@@ -100,8 +101,7 @@ def hitung_tarif(tarif):
     data["total_bersih"] += sisa
     data["total_bensin"] += bensin
     data["total_saldo"] += saldo
-    data["total_kantong"] += kantong_bersih
-    data["total_makan"] += makan
+    data["total_kantong"] += kantong
 
     n = len(data["orders"])
 
@@ -173,7 +173,30 @@ async def laporan_mingguan(context: ContextTypes.DEFAULT_TYPE):
 """.strip())
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Hallo Andhika! 👋\n\nKirim nomor HP pelanggan → dapat link WA + hitung tarif otomatis.\n\nKetik /help untuk lihat semua fitur.")
+    await update.message.reply_text("""
+Hallo Andhika! 👋🏍
+
+Selamat datang di OjolLink Bot — asisten pribadi driver Maxim kamu.
+
+🔗 LINK WA OTOMATIS
+Kirim nomor HP pelanggan dalam format apapun, bot langsung buatin link WA dengan pesan "Hallo dari Maxim" siap klik.
+
+💰 KALKULATOR TARIF
+Setelah dapat link, bot tanya tarif dan langsung hitung:
+• Potongan aplikasi 13%
+• Alokasi bensin & saldo
+• Uang bersih kantong
+
+📊 REKAP HARIAN
+Semua order tercatat otomatis. Ketik /rekap kapanpun buat lihat total hari ini. Reset otomatis tiap tengah malam.
+
+🌤 CUACA & BBM
+Cek cuaca sebelum narik, hitung estimasi biaya bensin per perjalanan.
+
+━━━━━━━━━━━━━━━━
+Ketik /menu untuk lihat semua fitur.
+Atau langsung kirim nomor HP pelanggan sekarang! 🚀
+""".strip())
     return ConversationHandler.END
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -312,10 +335,29 @@ async def set_target_saldo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def set_makan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.args:
-        nominal = re.sub(r'\D', '', context.args[0])
+        nominal = re.sub(r"\D", "", context.args[0])
         if nominal:
-            setting["uang_makan"] = int(nominal)
-            await update.message.reply_text(f"✅ Uang makan: Rp {int(nominal):,.0f}")
+            jumlah = int(nominal)
+            waktu = datetime.now().strftime("%H:%M")
+            data["history_makan"].append({"waktu": waktu, "jumlah": jumlah})
+            data["total_makan"] += jumlah
+            data["total_kantong"] -= jumlah
+
+            history_text = "\n".join([
+                f"• {h['waktu']} - Rp {h['jumlah']:,.0f}"
+                for h in data["history_makan"]
+            ])
+
+            await update.message.reply_text(f"""
+🍱 Pengeluaran makan dicatat!
+💸 Rp {jumlah:,.0f} dikurangi dari kantong
+
+📋 History Makan Hari Ini:
+{history_text}
+
+Total makan: Rp {data['total_makan']:,.0f}
+💰 Kantong bersih tersisa: Rp {data['total_kantong']:,.0f}
+""".strip())
             return ConversationHandler.END
     await update.message.reply_text("Contoh: /makan 15000")
     return ConversationHandler.END
