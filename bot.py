@@ -1,12 +1,15 @@
 import re
 import logging
-from datetime import time
+import json
+import aiohttp
+from datetime import time, datetime, timedelta
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, filters, ContextTypes, ConversationHandler
 
 TOKEN = "8849663961:AAHDnl2ooXZGBovLkFEn7NPc_XdkX_F6QQ4"
 PESAN = "Hallo, aku dari Maxim"
 CHAT_ID = 8036036520
+KOTA_DEFAULT = "Palu"
 
 TUNGGU_TARIF = 1
 
@@ -24,6 +27,9 @@ data = {
     "total_makan": 0,
 }
 
+# Riwayat mingguan (simpan per hari)
+riwayat = []
+
 # Pengaturan
 setting = {
     "hitung_bensin": True,
@@ -33,17 +39,38 @@ setting = {
     "uang_makan": 0,
     "bensin_tercapai": False,
     "saldo_tercapai": False,
+    "jenis_bbm": "pertalite",
+    "harga_bbm": 10000,
+    "konsumsi_km": 40,
+}
+
+HARGA_BBM = {
+    "pertalite": 10000,
+    "pertamax": 12300,
 }
 
 def reset_semua():
+    # Simpan data hari ini ke riwayat sebelum reset
+    if data["total_kotor"] > 0:
+        riwayat.append({
+            "tanggal": datetime.now().strftime("%d/%m/%Y"),
+            "hari": datetime.now().strftime("%A"),
+            "orders": len(data["orders"]),
+            "total_kotor": data["total_kotor"],
+            "total_bersih": data["total_bersih"],
+            "total_kantong": data["total_kantong"],
+        })
+        # Simpan max 7 hari
+        if len(riwayat) > 7:
+            riwayat.pop(0)
+
     for key in data:
         data[key] = [] if key == "orders" else 0
     setting["bensin_tercapai"] = False
     setting["saldo_tercapai"] = False
 
 def ekstrak_nomor(teks):
-    # Cari semua angka yang kemungkinan nomor HP
-    kandidat = re.findall(r'[\+62|62|0][\d\s\-]{8,17}', teks)
+    kandidat = re.findall(r'(?:\+62|62|0)[\d\s\-]{8,17}', teks)
     for k in kandidat:
         nomor = re.sub(r'[\s\-\(\)\+]', '', k)
         nomor = re.sub(r'\D', '', nomor)
@@ -56,9 +83,6 @@ def ekstrak_nomor(teks):
         if 10 <= len(nomor) <= 15:
             return nomor
     return None
-
-def is_nomor_hp(teks):
-    return ekstrak_nomor(teks) is not None
 
 def hitung_tarif(tarif):
     komisi = tarif * 0.13
@@ -81,7 +105,6 @@ def hitung_tarif(tarif):
 
     n = len(data["orders"])
 
-    # Cek apakah target tercapai
     notif_bensin = ""
     notif_saldo = ""
     if setting["hitung_bensin"] and not setting["bensin_tercapai"] and data["total_bensin"] >= setting["target_bensin"]:
@@ -120,10 +143,37 @@ async def auto_reset(context: ContextTypes.DEFAULT_TYPE):
     reset_semua()
     await context.bot.send_message(chat_id=CHAT_ID, text="🔄 Tengah malam! Data harian sudah direset. Semangat narik hari ini! 🚀")
 
+async def laporan_mingguan(context: ContextTypes.DEFAULT_TYPE):
+    if not riwayat:
+        await context.bot.send_message(chat_id=CHAT_ID, text="📊 Belum ada data minggu ini.")
+        return
+
+    total_kotor = sum(r["total_kotor"] for r in riwayat)
+    total_bersih = sum(r["total_bersih"] for r in riwayat)
+    total_kantong = sum(r["total_kantong"] for r in riwayat)
+    total_orders = sum(r["orders"] for r in riwayat)
+    hari_terbaik = max(riwayat, key=lambda x: x["total_kantong"])
+
+    detail = "\n".join([
+        f"📅 {r['tanggal']} — Rp {r['total_kantong']:,.0f} ({r['orders']} order)"
+        for r in riwayat
+    ])
+
+    await context.bot.send_message(chat_id=CHAT_ID, text=f"""
+📊 LAPORAN MINGGUAN
+
+{detail}
+
+━━━━━━━━━━━━━━━━
+💵 Total Kotor: Rp {total_kotor:,.0f}
+✅ Total Bersih: Rp {total_bersih:,.0f}
+🏁 Total Kantong: Rp {total_kantong:,.0f}
+🛵 Total Order: {total_orders}
+🏆 Hari Terbaik: {hari_terbaik['tanggal']} (Rp {hari_terbaik['total_kantong']:,.0f})
+""".strip())
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Hallo Andhika! 👋\n\nKirim nomor HP pelanggan → dapat link WA + hitung tarif otomatis.\n\nKetik /help untuk lihat semua fitur."
-    )
+    await update.message.reply_text("Hallo Andhika! 👋\n\nKirim nomor HP pelanggan → dapat link WA + hitung tarif otomatis.\n\nKetik /help untuk lihat semua fitur.")
     return ConversationHandler.END
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -147,9 +197,21 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 🍱 Pengeluaran:
 /makan [nominal] — Set uang makan
 
+🛵 BBM & Jarak:
+/setbbm — Pilih jenis BBM
+/setkm [km/liter] — Set konsumsi motor
+/jarak [km] — Hitung biaya bensin
+
+🌤 Cuaca:
+/cuaca — Cuaca Palu
+/cuaca [kota] — Cuaca kota lain
+
 Contoh:
 /targetbensin 30000
 /makan 15000
+/setkm 40
+/jarak 25
+/cuaca Manado
 """.strip())
     return ConversationHandler.END
 
@@ -232,7 +294,7 @@ async def set_target_bensin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if nominal:
             setting["target_bensin"] = int(nominal)
             setting["bensin_tercapai"] = False
-            await update.message.reply_text(f"✅ Target bensin diset ke Rp {int(nominal):,.0f}")
+            await update.message.reply_text(f"✅ Target bensin: Rp {int(nominal):,.0f}")
             return ConversationHandler.END
     await update.message.reply_text("Contoh: /targetbensin 30000")
     return ConversationHandler.END
@@ -243,7 +305,7 @@ async def set_target_saldo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if nominal:
             setting["target_saldo"] = int(nominal)
             setting["saldo_tercapai"] = False
-            await update.message.reply_text(f"✅ Target saldo diset ke Rp {int(nominal):,.0f}")
+            await update.message.reply_text(f"✅ Target saldo: Rp {int(nominal):,.0f}")
             return ConversationHandler.END
     await update.message.reply_text("Contoh: /targetsaldo 30000")
     return ConversationHandler.END
@@ -253,14 +315,75 @@ async def set_makan(update: Update, context: ContextTypes.DEFAULT_TYPE):
         nominal = re.sub(r'\D', '', context.args[0])
         if nominal:
             setting["uang_makan"] = int(nominal)
-            await update.message.reply_text(f"✅ Uang makan diset ke Rp {int(nominal):,.0f}")
+            await update.message.reply_text(f"✅ Uang makan: Rp {int(nominal):,.0f}")
             return ConversationHandler.END
     await update.message.reply_text("Contoh: /makan 15000")
     return ConversationHandler.END
 
+async def set_bbm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("""
+Pilih jenis BBM:
+1️⃣ /setbbm pertalite — Rp 10.000/liter
+2️⃣ /setbbm pertamax — Rp 12.300/liter
+""".strip())
+    if context.args:
+        jenis = context.args[0].lower()
+        if jenis in HARGA_BBM:
+            setting["jenis_bbm"] = jenis
+            setting["harga_bbm"] = HARGA_BBM[jenis]
+            await update.message.reply_text(f"✅ BBM diset ke {jenis.capitalize()} Rp {HARGA_BBM[jenis]:,.0f}/liter")
+    return ConversationHandler.END
+
+async def set_km(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.args:
+        km = re.sub(r'\D', '', context.args[0])
+        if km:
+            setting["konsumsi_km"] = int(km)
+            await update.message.reply_text(f"✅ Konsumsi motor: {km} km/liter")
+            return ConversationHandler.END
+    await update.message.reply_text("Contoh: /setkm 40")
+    return ConversationHandler.END
+
+async def hitung_jarak(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.args:
+        km = re.sub(r'\D', '', context.args[0])
+        if km:
+            jarak = int(km)
+            liter = jarak / setting["konsumsi_km"]
+            biaya = liter * setting["harga_bbm"]
+            await update.message.reply_text(f"""
+🛵 Estimasi BBM:
+📍 Jarak: {jarak} km
+⛽ BBM: {setting['jenis_bbm'].capitalize()} Rp {setting['harga_bbm']:,.0f}/liter
+🔢 Konsumsi: {setting['konsumsi_km']} km/liter
+💧 Kebutuhan: {liter:.2f} liter
+💰 Biaya: Rp {biaya:,.0f}
+""".strip())
+            return ConversationHandler.END
+    await update.message.reply_text("Contoh: /jarak 25")
+    return ConversationHandler.END
+
+async def cuaca(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    kota = "+".join(context.args) if context.args else KOTA_DEFAULT
+    try:
+        url = f"https://wttr.in/{kota}?format=3&lang=id"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers={"User-Agent": "curl/7.68.0"}) as resp:
+                if resp.status == 200:
+                    teks = await resp.text()
+                    await update.message.reply_text(f"🌤 {teks.strip()}")
+                else:
+                    await update.message.reply_text(f"Kota tidak ditemukan. Coba nama kota lain.")
+    except Exception:
+        await update.message.reply_text("Gagal ambil data cuaca. Coba lagi nanti.")
+    return ConversationHandler.END
+
 app = ApplicationBuilder().token(TOKEN).build()
 
+# Reset tiap tengah malam WIB = 17.00 UTC
 app.job_queue.run_daily(auto_reset, time=time(17, 0, 0))
+# Laporan mingguan tiap Senin pagi jam 07.00 WIB = 23.00 UTC Minggu
+app.job_queue.run_daily(laporan_mingguan, time=time(23, 0, 0), days=(6,))
 
 conv_handler = ConversationHandler(
     entry_points=[MessageHandler(filters.TEXT & ~filters.COMMAND, handle_nomor)],
@@ -280,6 +403,10 @@ conv_handler = ConversationHandler(
         CommandHandler("targetbensin", set_target_bensin),
         CommandHandler("targetsaldo", set_target_saldo),
         CommandHandler("makan", set_makan),
+        CommandHandler("setbbm", set_bbm),
+        CommandHandler("setkm", set_km),
+        CommandHandler("jarak", hitung_jarak),
+        CommandHandler("cuaca", cuaca),
     ],
 )
 
@@ -295,6 +422,10 @@ app.add_handler(CommandHandler("saldo", toggle_saldo))
 app.add_handler(CommandHandler("targetbensin", set_target_bensin))
 app.add_handler(CommandHandler("targetsaldo", set_target_saldo))
 app.add_handler(CommandHandler("makan", set_makan))
+app.add_handler(CommandHandler("setbbm", set_bbm))
+app.add_handler(CommandHandler("setkm", set_km))
+app.add_handler(CommandHandler("jarak", hitung_jarak))
+app.add_handler(CommandHandler("cuaca", cuaca))
 app.add_handler(conv_handler)
 
 print("Bot jalan...")
